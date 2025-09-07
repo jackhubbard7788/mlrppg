@@ -1,0 +1,90 @@
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.signal import detrend, butter, lfilter
+import pywt
+
+signal = []
+face_classifier = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+video_capture = cv2.VideoCapture("video file path here")
+global fps
+fps = video_capture.get(cv2.CAP_PROP_FPS)
+def detect_roi(vid):
+    gray_image = cv2.cvtColor(vid, cv2.COLOR_BGR2GRAY)
+    faces = face_classifier.detectMultiScale(gray_image, 1.1, 10, minSize=(40, 40))
+    for (x, y, w, h) in faces:
+        roi = vid[y:y+int(h/4), x+int(w/4):x+3*int(w/4), :] #Proportions to map roi to forehead, can be adjusted. Might be better to use facial landmarks
+    return roi
+def extract_signal(roi_frame):#Raw rPPG signal
+    bsum = gsum = rsum = 0
+    n = 0
+    for y in roi_frame:
+        for x in y:
+            b, g, r = x
+            bsum += b
+            gsum += g
+            rsum += r
+            n += 1
+    return gsum/n
+def refine_signal(raw_signal): #Signal pre-processing
+    #Detrending
+    rs_d = detrend(raw_signal, type = 'linear')
+    #Moving Average Filtering
+    i = 0
+    rs_dma = []
+    while i < len(rs_d) - 2:
+        window_average = np.sum(rs_d[i:i+3]) / 3
+        rs_dma.append(window_average)
+        i += 1
+    #Band Pass Filtering 0.65-4hz
+    b, a = butter(5, [0.65, 4], btype = 'bandpass', fs=fps)
+    filtered = lfilter(b, a, rs_dma)
+    return filtered
+
+while video_capture.isOpened():
+    result, video_frame = video_capture.read()
+    if not result:
+        break
+    signal.append(extract_signal(detect_roi(video_frame)))
+    
+video_capture.release()
+prep_signal = refine_signal(signal)
+
+#Post Processing using wavelet filtering, centering gaussian window on frequency with highest power
+import pandas
+#Setup
+dt = 1/fps
+freq_min = 0.325
+freq_max = fps/2
+fc = pywt.central_frequency("morl")
+scale_min = fc / (freq_max*dt)
+scale_max = fc / (freq_min*dt)
+#Making Scales
+octaves = np.log2(freq_max/freq_min)
+step = int(np.ceil(octaves * 32))
+s = np.arange(step + 1)
+freqs = freq_min * (2 ** (s/32))
+scales = fc/(freqs*dt)
+coefs, freqs = pywt.cwt(prep_signal, scales, "morl")
+#Square coefficients
+power = np.abs(coefs) ** 2
+#Average power over 15s temporal running window
+samples = 15*fps
+window = np.ones(int(samples)) / samples
+average = np.array([np.convolve(p, window, mode = "same") for p in power])
+#Find scales corresponding to max power
+index = np.argmax(average, axis = 0)
+dom_scales = scales[index]
+dom_freqs = freqs[index]
+log_scales = np.log(scales)
+log_dominant_scales = np.log(dom_scales)
+#Gaussian filter centered on scale with max power
+weights = np.exp(-0.5 * ((log_scales[: , None] - log_dominant_scales[None, :]) / 0.2) ** 2)
+filtered_coefs = coefs * weights
+#Reconstruct filtered PPG
+n_scales, n_times = filtered_coefs.shape
+drt = np.diff(scales, prepend = scales[0])
+reconstructed = np.zeros(n_times)
+for i in range(n_scales):
+    reconstructed += (filtered_coefs[i, :] / np.sqrt(scales[i]) * drt[i]) #Post-processed signal
+
