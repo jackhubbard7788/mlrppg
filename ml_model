@@ -1,0 +1,95 @@
+#Training ML Model
+import scipy.signal as signal
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error
+import os
+window_sizet = 5 #5 second window
+step_sizet = 1 #1 second 
+features = []
+for folder in os.listdir(r"D:\\DATA\\DATASET_2"):
+        with open(("D:\\DATA\\DATASET_2" + "\\" + folder + "\\" + "ground_truth.txt")) as data:
+                lines = data.read().splitlines()
+                ppg2 = list(map(float, lines[0].split()))
+                hr2 = list(map(float, lines[1].split()))
+                time2 = list(map(float, lines[2].split()))
+                ppg2 = signal.detrend(ppg2)
+                mean = np.mean(ppg2)
+                std = np.std(ppg2)
+                ppg2 -= mean
+                ppg = ppg2/std
+        sampling_rate = len(ppg) / time2[-1]
+        #Create windows of PPG signal
+        window_size = window_sizet * int(sampling_rate)
+        step_size = step_sizet * int(sampling_rate)
+        for start in range(0, len(ppg) - window_size + 1, step_size):
+                window = ppg[start:start + window_size]
+                peaks, _= signal.find_peaks(window, distance = sampling_rate/4)
+                ibi = np.diff(peaks) / sampling_rate
+                hist, bin_edges = np.histogram(window, bins = int(np.sqrt(len(window))), density = True)
+                hist = hist[hist > 0]
+                entropy = -np.sum(hist * np.log2(hist))
+                amplitudes = []
+                rtimes = []
+                dtimes = []
+                slopes = []
+                fwhms = []
+                for peak in peaks:
+                        peak_value = window[peak]
+                        half_peak = peak_value / 2
+                        left = right = peak
+                        while left > 0 and window[left] > half_peak:
+                                left -= 1
+                        while right < len(window) and window[right] > half_peak:
+                                right += 1
+                        width = (right-left) / sampling_rate
+                        fwhms.append(width)
+                for i in range(len(peaks)-1):
+                        beat = window[peaks[i]:peaks[i+1]+1]
+                        amplitude = np.max(beat) - np.min(beat)
+                        amplitudes.append(amplitude)
+                        dtimes.append((len(beat) - np.argmax(beat))/sampling_rate)
+                features.append({
+                        "mean_ibi": np.mean(ibi),
+                        "hrv": np.std(ibi),
+                        "rmssd": np.sqrt(np.mean(np.diff(ibi)**2)),
+                        "mean_hr": 60 / np.mean(ibi),
+                        #"mean_rise": np.mean(rtimes),
+                        #"std_rise": np.std(rtimes),
+                        #"mean_decay": np.mean(dtimes),
+                        #"std_decay": np.std(dtimes),
+                        #"mean_amplitudes": np.mean(amplitudes),
+                        #"std_amplitudes": np.std(amplitudes),
+                        #"mean_fwhm": np.mean(fwhms),
+                        #"std_fwhm": np.std(fwhms),
+                        "target": np.mean(hr2[start:start+step_size]),
+                        "id": folder
+                        })
+#Window of HR
+''''hr = []
+for start in range(0, len(hr2) - window_size + 1, step_size):
+        window = hr2[start:start+step_size]
+        hr.append(np.mean(window))'''
+dataframe_features = pandas.DataFrame(features)
+#Group-aware split
+from sklearn.model_selection import GroupShuffleSplit
+X = dataframe_features.drop(columns = ["target", "id"]).values
+y = dataframe_features["target"].values
+groups = dataframe_features["id"].values
+split = GroupShuffleSplit(n_splits = 1, test_size = 0.2, random_state = 42)
+training_index, testing_index = next(split.split(X, y, groups))
+X_train, X_test = X[training_index], X[testing_index]
+y_train, y_test = y[training_index], y[testing_index]
+from sklearn.preprocessing import StandardScaler
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+from sklearn.decomposition import PCA
+pca = PCA(n_components = 0.95, random_state = 42)
+X_train_pca = pca.fit_transform(X_train_scaled)
+X_test_pca = pca.transform(X_test_scaled)
+#Model Training
+model = RandomForestRegressor(n_estimators = 300, max_depth = 60, random_state = 42, n_jobs = 1)
+model.fit(X_train, y_train)
+#Model Evaluation
+y_pred = model.predict(X_test)
+print(mean_squared_error(y_test, y_pred))
