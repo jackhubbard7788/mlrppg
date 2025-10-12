@@ -3,7 +3,7 @@ import scipy.signal as signal
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
 import os
-window_sizet = 5 #5 second window
+window_sizet = 10 #10 second window
 step_sizet = 1 #1 second 
 features = []
 for folder in os.listdir(r"D:\\DATA\\DATASET_2"):
@@ -70,7 +70,7 @@ for folder in os.listdir(r"D:\\DATA\\DATASET_2"):
                         "std_amplitudes": np.std(amplitudes),
                         "mean_fwhm": np.mean(fwhms),
                         "std_fwhm": np.std(fwhms),
-                        "target": np.mean(hr2[start:start+step_size]),
+                        "target": np.mean(hr2[start:start+window_size]),
                         "id": folder
                         })
 #Window of HR
