@@ -23,11 +23,9 @@ for folder in os.listdir(r"D:\\DATA\\DATASET_2"):
         step_size = step_sizet * int(sampling_rate)
         for start in range(0, len(ppg) - window_size + 1, step_size):
                 window = ppg[start:start + window_size]
-                peaks, _= signal.find_peaks(window, distance = sampling_rate/4)
+                peaks, _ = signal.find_peaks(window, distance = sampling_rate/4)
+                valleys, _ = signal.find_peaks(window, distance = sampling_rate/4)
                 ibi = np.diff(peaks) / sampling_rate
-                hist, bin_edges = np.histogram(window, bins = int(np.sqrt(len(window))), density = True)
-                hist = hist[hist > 0]
-                entropy = -np.sum(hist * np.log2(hist))
                 amplitudes = []
                 rtimes = []
                 dtimes = []
@@ -48,19 +46,30 @@ for folder in os.listdir(r"D:\\DATA\\DATASET_2"):
                         amplitude = np.max(beat) - np.min(beat)
                         amplitudes.append(amplitude)
                         dtimes.append((len(beat) - np.argmax(beat))/sampling_rate)
+                for i in range(1, len(peaks)):
+                        valleys_before = valleys[valleys < peaks[i]]
+                        valleys_after = valleys[valleys > peaks[i]]
+                        if len(valleys_before) == 0 or len(valleys_after) == 0:
+                                continue
+                        valley_before = valleys_before[-1]
+                        valley_after = valleys_after[0]
+                        rise_time = (peaks[i] - valley_before)/sampling_rate
+                        decay_time = (valley_after - peaks[i])/sampling_rate
+                        rtimes.append(rise_time)
+                        dtimes.append(decay_time)
                 features.append({
                         "mean_ibi": np.mean(ibi),
                         "hrv": np.std(ibi),
                         "rmssd": np.sqrt(np.mean(np.diff(ibi)**2)),
                         "mean_hr": 60 / np.mean(ibi),
-                        #"mean_rise": np.mean(rtimes),
-                        #"std_rise": np.std(rtimes),
-                        #"mean_decay": np.mean(dtimes),
-                        #"std_decay": np.std(dtimes),
-                        #"mean_amplitudes": np.mean(amplitudes),
-                        #"std_amplitudes": np.std(amplitudes),
-                        #"mean_fwhm": np.mean(fwhms),
-                        #"std_fwhm": np.std(fwhms),
+                        "mean_rise": np.mean(rtimes),
+                        "std_rise": np.std(rtimes),
+                        "mean_decay": np.mean(dtimes),
+                        "std_decay": np.std(dtimes),
+                        "mean_amplitudes": np.mean(amplitudes),
+                        "std_amplitudes": np.std(amplitudes),
+                        "mean_fwhm": np.mean(fwhms),
+                        "std_fwhm": np.std(fwhms),
                         "target": np.mean(hr2[start:start+step_size]),
                         "id": folder
                         })
